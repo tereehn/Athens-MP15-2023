@@ -1,0 +1,530 @@
+---
+title: "Extreme Value Statistics - project"
+author:
+  - Tereza Ehnová
+  - Maciej Chylak
+output: html_document
+date: '2023-03-15'
+---
+
+
+```{r, include=FALSE}
+library(dplyr)
+library(extRemes)
+library(ggplot2)
+library(ismev)
+library(evd)
+library(reshape)
+library('ROOPSD')
+library('VineCopula')
+library(sp)
+```
+
+### Loading data and preprocessing
+
+```{r}
+load("G8_Rainfall.RData")
+
+colnames(dataset) <- c("loc_1", "loc_2", "loc_3", "loc_4", "loc_5")
+head(dataset)
+```
+```{r}
+rainfall_g8 <- as.data.frame(dataset)
+rainfall_g8["day"] <- as.Date(as.character(dates))
+rainfall_g8["month_n"] <- format(rainfall_g8["day"], "%m")
+rainfall_g8["year_n"] <- format(rainfall_g8["day"], "%Y")
+rainfall_g8["year_month_n"] <- format(rainfall_g8["day"], "%Y%m")
+rainfall_g8["weekday"] <- factor(weekdays(rainfall_g8$day, abbreviate=TRUE), levels=c("Mon","Tue","Wed","Thu", "Fri", "Sat", "Sun"), ordered=TRUE)
+
+rainfall_g8$month_n <- as.numeric(rainfall_g8$month_n)
+rainfall_g8$year_n <- as.numeric(rainfall_g8$year_n)
+rainfall_g8$year_month_n <- as.numeric(rainfall_g8$year_month_n)
+
+rainfall_g8$month_c <- as.character(rainfall_g8$month_n)
+rainfall_g8$year_c <- as.character(rainfall_g8$year_n)
+rainfall_g8$year_month_c <- as.character(rainfall_g8$year_month_n)
+
+rainfall_g8_up <- melt(rainfall_g8, id=c("day", "month_n", "year_n", "year_month_n", "month_c", "year_c", "year_month_c", "weekday"))
+rainfall_g8_up$value <- as.numeric(rainfall_g8_up$value)
+
+colnames(rainfall_g8_up) <- c("day", "month_n", "year_n", "year_month_n", "month_c", "year_c", "year_month_c", "weekday", "location", "value")
+```
+
+```{r}
+summary(rainfall_g8[, c("loc_1", "loc_2", "loc_3", "loc_4", "loc_5")])
+```
+### Correlation of rainfall in weather stations
+
+```{r, warning=FALSE}
+df_cor <- melt(round(cor(subset(rainfall_g8, select=c(loc_1, loc_2, loc_3, loc_4, loc_5))), 2))
+
+ggplot(df_cor, aes(x=X2, y=X1, fill=value)) +
+  geom_tile() +
+  scale_fill_gradient2(low="blue", high="red", mid="white", midpoint=0, limit=c(-1, 1), name="correlation") +
+  labs(title="Correlation matrix of rainfall in each location" , y="", x="") + 
+  theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5")) +
+  geom_text(aes(X2, X1, label=value))
+```
+Recorded rainfall at weather stations is highly correlated with each other. These station are probably not far away -> Tobler's First Law of Geography
+
+```{r}
+head(rainfall_g8_up)
+```
+
+### Distribution of rainfall data
+
+```{r include=FALSE}
+rainfall_g8_gyears <- rainfall_g8_up %>% 
+  group_by(year_c, year_n, location) %>%
+  summarise(
+    total_rainfall = sum(value),
+    mean_rainfall = mean(value),
+    max_rainfall = max(value),
+  )
+
+rainfall_g8_gweekday <- rainfall_g8_up %>% 
+  group_by(weekday, location) %>%
+  summarise(
+    total_rainfall = sum(value),
+    mean_rainfall = mean(value),
+    max_rainfall = max(value),
+  )
+
+rainfall_g8_gmonth <- rainfall_g8_up %>% 
+  group_by(month_c, month_n, location) %>%
+  summarise(
+    total_rainfall = sum(value),
+    mean_rainfall = mean(value),
+    max_rainfall = max(value),
+  )
+
+
+rainfall_g8_gyear_month <- rainfall_g8_up %>% 
+  group_by(year_month_c, year_month_n, location) %>%
+  summarise(
+    total_rainfall = sum(value),
+    mean_rainfall = mean(value),
+    max_rainfall = max(value),
+  )
+
+```
+
+```{r}
+ggplot(data=rainfall_g8_gyears, aes(x=year_n, y=mean_rainfall, color=location)) + 
+  geom_line()  +
+  labs(title="Timeseries of average of rainfall in each location" , y="Rainfall", x="Years", legend="Location") +    theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5"))
+```
+
+```{r}
+ggplot(data=rainfall_g8_gyears, aes(x=year_n, y=max_rainfall, color=location)) + 
+  geom_line()  +
+  labs(title="Timeseries of max of rainfall in each location" , y="Rainfall", x="Years", legend="Location") +    theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5"))
+```
+
+```{r}
+ggplot(data=rainfall_g8_gyears, aes(x=year_n, y=total_rainfall, color=location)) + 
+  geom_line()  +
+  labs(title="Timeseries of total of rainfall in each location" , y="Rainfall", x="Years", legend="Location") +    theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5"))
+```
+Rainfall data seems to be stationary. We don't need to perform any related transformations
+
+Also rainfall data is mixing. Value at widely-separated times are asymptotically independent (due to the nature of weather data).
+
+```{r}
+ggplot(data=rainfall_g8_up[rainfall_g8_up["location"] == "loc_1", ], aes(x=weekday, y=value, color=weekday)) + 
+  geom_boxplot()  +
+  labs(title="Distribution of total of rainfall in each weekday" , y="Rainfall", x="Years", legend="Location") +    theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5"))
+```
+
+```{r}
+rainfall_g8_up$month_c <- factor(rainfall_g8_up$month_c, levels=as.character(1:12))
+
+ggplot(data=rainfall_g8_up[rainfall_g8_up["location"] == "loc_1", ], aes(x=month_c, y=value, color=month_c)) + 
+  geom_boxplot()  +
+  labs(title="Distribution of total of rainfall in each location" , y="Rainfall", x="Years", color="Month") +    theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5")) +
+  scale_fill_manual(breaks=as.character(1:12))
+```
+
+```{r}
+ggplot(data=rainfall_g8_up, aes(x=value)) + 
+  geom_histogram() +
+  facet_wrap(.~location) + 
+  labs(title="Distribution of total of rainfall in each location" , y="Rainfall", x="Years", color="Month") +   theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5")) +
+  scale_fill_manual(breaks=as.character(1:12))
+```
+
+```{r}
+ggplot(data=rainfall_g8_up[rainfall_g8_up["value"] > 25, ], aes(x=value)) + 
+  geom_histogram() +
+  facet_wrap(.~location) + 
+  labs(title="Distribution of total of rainfall above 25 in each location" , y="Rainfall", x="Years", color="Month") +   theme(plot.title=element_text(color="black", size=16, face="bold.italic", hjust="0.5")) +
+  scale_fill_manual(breaks=as.character(1:12))
+```
+
+We can see here that in our data we've got a lot of extreme values. Usually it is not raining, but from time to time the rainfall is really strong.
+In each station we can observe a similar distribution of data.
+
+For the above reasons, we can conclude that the data meet the assumptions of Extreme Value Theory.
+
+### Fit to GEV distribution
+
+```{r}
+x1 <- rainfall_g8_gyear_month[rainfall_g8_gyear_month["location"] == "loc_1", ]$max_rainfall
+x2 <- rainfall_g8_gyear_month[rainfall_g8_gyear_month["location"] == "loc_2", ]$max_rainfall
+x3 <- rainfall_g8_gyear_month[rainfall_g8_gyear_month["location"] == "loc_3", ]$max_rainfall
+x4 <- rainfall_g8_gyear_month[rainfall_g8_gyear_month["location"] == "loc_4", ]$max_rainfall
+x5 <- rainfall_g8_gyear_month[rainfall_g8_gyear_month["location"] == "loc_5", ]$max_rainfall
+
+f1 <- gev.fit(x1)
+f2 <- gev.fit(x2)
+f3 <- gev.fit(x3)
+f4 <- gev.fit(x4)
+f5 <- gev.fit(x5)
+```
+
+```{r}
+gev.diag(f1)
+```
+
+```{r}
+print(paste("Shape:", as.character(f1$mle[3]), sep= " "))
+```
+Shape parameter is greater than zero, so this distribution is heavy tailed and its commonly known as Fréchet distribution.
+
+The distribution appears to be a good fit to the theoretical data (qq plot analysis).
+
+```{r}
+gev.diag(f2)
+```
+
+```{r}
+print(paste("Shape:", as.character(f2$mle[3]), sep= " "))
+```
+
+Shape parameter is greater than zero, so this distribution is heavy tailed and its commonly known as Fréchet distribution.
+
+The distribution appears to be a good fit to the theoretical data (qq plot analysis).
+
+```{r}
+gev.diag(f3)
+```
+
+```{r}
+print(paste("Shape:", as.character(f3$mle[3]), sep= " "))
+```
+
+Shape parameter is greater than zero, so this distribution is heavy tailed and its commonly known as Fréchet distribution.
+
+In larger quantiles, the distribution seems to diverge from the theoretical values. In other quantiles it is ok.
+
+```{r}
+gev.diag(f4)
+```
+
+```{r}
+print(paste("Shape:", as.character(f4$mle[3]), sep= " "))
+```
+
+Shape parameter is greater than zero, so this distribution is heavy tailed and its commonly known as Fréchet distribution.
+
+The distribution appears to be a good fit to the theoretical data (qq plot analysis).
+
+
+```{r}
+gev.diag(f5)
+```
+
+```{r}
+print(paste("Shape:", as.character(f5$mle[3]), sep= " "))
+```
+
+Shape parameter is greater than zero, so this distribution is heavy tailed and its commonly known as Fréchet distribution.
+
+The distribution appears to be a good fit to the theoretical data (qq plot analysis).
+
+
+### Choosing threshold
+
+```{r Fig1, echo=TRUE, fig.height=12, fig.width=5}
+
+par(mfrow=c(5, 1))
+mrl.plot(rainfall_g8$loc_1) # 30, 60
+mrl.plot(rainfall_g8$loc_2) # 20, 40
+mrl.plot(rainfall_g8$loc_3) # 40, 60
+mrl.plot(rainfall_g8$loc_4) # 50
+mrl.plot(rainfall_g8$loc_5) # 40
+```
+```{r}
+gpd.fitrange(rainfall_g8$loc_1, 0, 50)
+```
+```{r}
+gpd.fitrange(rainfall_g8$loc_2, 0, 50)
+```
+
+```{r}
+gpd.fitrange(rainfall_g8$loc_3, 0, 50)
+```
+
+```{r}
+gpd.fitrange(rainfall_g8$loc_4, 0, 50)
+```
+
+```{r}
+gpd.fitrange(rainfall_g8$loc_5, 0, 50)
+```
+
+We decided to choose following thresholds due to parameter stability:
+loc1 - 25
+loc2 - 25
+loc3 - 25
+loc4 - 25
+loc5 - 25
+
+### Fit data to General Pareto Distribution
+
+```{r}
+f1_threshold <- gpd.fit(rainfall_g8$loc_1, 25)
+f2_threshold <- gpd.fit(rainfall_g8$loc_2, 25)
+f3_threshold <- gpd.fit(rainfall_g8$loc_3, 25)
+f4_threshold <- gpd.fit(rainfall_g8$loc_4, 25)
+f5_threshold <- gpd.fit(rainfall_g8$loc_5, 25)
+```
+
+nexc - here we can see the number of observations above threshold
+convs - looking at the values, we can conclude that all convergences were successful
+nllh - negative logarithm of likelihood at maximum
+mle - proportion of data above threshold
+rate - standard errors
+
+### Confidence interval for shape parameters
+
+```{r}
+gpd.profxi(f1_threshold, -0.2, 0.5)
+```
+
+```{r}
+gpd.profxi(f2_threshold, -0.2, 0.7)
+```
+
+```{r}
+gpd.profxi(f3_threshold, -0.2, 1.0)
+```
+
+```{r}
+gpd.profxi(f4_threshold, -0.2, 0.5)
+```
+
+```{r}
+gpd.profxi(f5_threshold, -0.2, 1.0)
+```
+We can see that the shape parameter almost in every case takes positive values. 
+Thus, we are dealing here with a distributions with a heavy tail
+
+### Confidence interval of return level for return period=100 in each weather station
+
+```{r}
+gpd.prof(f1_threshold, m=100, 60, 200)
+```
+```{r}
+gpd.prof(f2_threshold, m=100, 60, 250)
+```
+```{r}
+gpd.prof(f3_threshold, m=100, 60, 500)
+```
+```{r}
+gpd.prof(f4_threshold, m=100, 60, 300)
+```
+```{r}
+gpd.prof(f5_threshold, m=100, 60, 300)
+```
+
+We can observe similar confidence intervals for stations 2, 5. 
+For station number 3 the values are much higher, while for stations number 1 and 4 they are slightly lower
+
+### Extremal index for first weather station for threshold equals to 25
+
+```{r}
+theta <- extremalindex(rainfall_g8$loc_1, method="runs", threshold=25)
+theta
+```
+
+Extremal index value of 0.96 means that the Gumbel distribution for the stationary process is almost 
+identical to that formed by independent random variables with the same marginal distributions.
+It measures the clustering of data. Values close to one mean that the maximum values do not tend to cluster.
+
+
+```{r}
+theta <- extremalindex(rainfall_g8$loc_2, method="runs", threshold=25)
+theta
+```
+Extremal index value of 0.96 means that the Gumbel distribution for the stationary process is almost 
+identical to that formed by independent random variables with the same marginal distributions.
+It measures the clustering of data. Values close to one mean that the maximum values do not tend to cluster.
+
+```{r}
+theta <- extremalindex(rainfall_g8$loc_3, method="runs", threshold=25)
+theta
+```
+Extremal index value of 0.95 means that the Gumbel distribution for the stationary process is almost 
+identical to that formed by independent random variables with the same marginal distributions.
+It measures the clustering of data. Values close to one mean that the maximum values do not tend to cluster.
+```{r}
+theta <- extremalindex(rainfall_g8$loc_4, method="runs", threshold=25)
+theta
+```
+Extremal index value of 0.95 means that the Gumbel distribution for the stationary process is almost 
+identical to that formed by independent random variables with the same marginal distributions.
+It measures the clustering of data. Values close to one mean that the maximum values do not tend to cluster.
+```{r}
+theta <- extremalindex(rainfall_g8$loc_5, method="runs", threshold=25)
+theta
+```
+Extremal index value of 0.90 means that the Gumbel distribution for the stationary process is almost 
+identical to that formed by independent random variables with the same marginal distributions.
+It measures the clustering of data. Values close to one mean that the maximum values do not tend to cluster.
+
+
+```{r}
+# Function to estimate the empirical extremogram between two locations
+computeExtremalCoeff <- function(pos1, pos2, database, u) {
+# Subset the data above the threshold value
+  subdata <- database[database[, pos1] > u & !is.na(database[, pos1]) &
+                      database[, pos2] > u & !is.na(database[, pos2]), ]
+  # Compute the extremal coefficient using the subsetted data
+  theta <- nrow(subdata) / length(which((database[, pos1] > u & !is.na(database[, pos1]))))
+  return(theta)
+}
+```
+
+```{r}
+quantiles
+```
+
+Multivariate extremal coefficient
+```{r}
+
+##### CALCULATION OF EXTREMAL COEFFICIENT FOR ALL THE PAIRS ###########
+#### get them in separate dataframe
+loc1_df <- subset(rainfall_g8_gyear_month,location == 'loc_1')
+loc2_df <- subset(rainfall_g8_gyear_month,location == 'loc_2')
+loc3_df <- subset(rainfall_g8_gyear_month,location == 'loc_1')
+loc4_df <- subset(rainfall_g8_gyear_month,location == 'loc_2')
+loc5_df <- subset(rainfall_g8_gyear_month,location == 'loc_2')
+
+threshold <- 25 ## according to what was calculated, for the location separately
+
+
+combined_df <- cbind(loc1_df["max_rainfall"], loc2_df["max_rainfall"],loc3_df["max_rainfall"],loc4_df["max_rainfall"],loc5_df["max_rainfall"])
+### 
+
+# local quantiles for each variable
+quantiles <- apply(combined_df[,1:5], 2, quantile, probs = 0.95, na.rm = TRUE)
+
+# the number of variables
+n_vars <- ncol(combined_df[,1:5])
+## compute the extreme coefficient for all the pairs
+
+# matrix to store the extremal coefficients
+theta <- matrix(0, nrow = n_vars, ncol = n_vars)
+
+for (i in 1:(n_vars - 1)) {
+  for (j in (i + 1):n_vars) {
+    theta[i, j] <- computeExtremalCoeff(pos1 = i, pos2 = j, database = combined_df[,1:5], threshold)
+    theta[j, i] <- theta[i, j] # Store the symmetric value
+  }
+}
+
+#The estimated extremal coefficients
+colnames(theta) <- rownames(theta) <- names(combined_df[,1:5])
+print(theta)
+
+```
+
+####FIRST AND SECOND LOCATION###
+
+```{r}
+
+# Set quantile level
+
+quantileLevel <- 0.95
+quantile_1 <- quantile(combined_df[, 1], quantileLevel, na.rm = TRUE)
+quantile_2 <- quantile(combined_df[, 2], quantileLevel, na.rm = TRUE)
+
+# data above and below threshold quantile
+tmp_below_1 <- combined_df[combined_df[, 1] <= 25, 1]
+tmp_above_1 <- combined_df[combined_df[, 1] > 25, 1] 
+tmp_below_2 <- combined_df[combined_df[, 2] <= 25, 2]
+tmp_above_2 <- combined_df[combined_df[, 2] > 25, 2] 
+
+scale_1 <- 7.3655429
+scale_2 <- 6.8489896
+shape_1 <- 0.1405578
+shape_2 <- 0.1559929
+
+#### first location
+
+empiricalCdf_1 <- ecdf(combined_df[, 1])
+
+empiricalCdf_2 <- ecdf(combined_df[, 2])
+
+normalized_database <- matrix(NA, nrow = length(combined_df[, 1]), ncol = 2)
+
+normalized_database[combined_df[, 1] <= quantile_1, 1] <- 1 / (1 - empiricalCdf_1(combined_df[combined_df[, 1] <= quantile_1 ,1])) - 1
+
+normalized_database[combined_df[, 1] > quantile_1, 1] <- 1 / ((1 - quantileLevel) * (1 + shape_1*(combined_df[combined_df[, 1] > quantile_1, 1] - quantile_1) / scale_1) ^ (-1 / shape_1)) - 1
+
+
+normalized_database[combined_df[, 2] <= quantile_1, 2] <- 1 / (1 - empiricalCdf_2(combined_df[combined_df[, 2] <= quantile_1 ,2])) - 1
+
+normalized_database[combined_df[, 2] > quantile_2, 2] <- 1 / ((1 - quantileLevel) * (1 + shape_2 * (combined_df[combined_df[, 2] > quantile_2, 2] - quantile_2) / scale_2) ^ (-1 / shape_2)) - 1
+
+```
+CALCULATION OF COPULA 
+```{r}
+ecdf_1 <- ecdf(normalized_database[, 1])
+ecdf_2 <- ecdf(normalized_database[, 2])
+ecdf_loc_1 <- ecdf_1(normalized_database[, 1])
+ecdf_loc_2 <- ecdf_1(normalized_database[, 2])
+edfc =rbind(ecdf_loc_1,ecdf_loc_2)
+# Fit a copula with Frechet margins, gumbel copula (for extremne values)
+fit <- BiCopSelect(ecdf_loc_1, ecdf_loc_2)
+
+
+### pickands function
+
+
+# Calculate the empirical exceedance probability for each observation in each variable
+u_1 <- sapply(normalized_database[, 1], function(x) ecdf_1(x))
+u_2 <- sapply(normalized_database[, 2], function(x) ecdf_2(x))
+
+# Combine the transformed variables into a matrix
+u <- cbind(u_1, u_2)
+
+n <- nrow(u)
+k <- 30  # number of intervals for estimating the Pickands function
+U <- seq(1/k, 1, length = k)  # partition [0, 1] into k intervals
+n_i <- rep(0, k)
+S_i <- rep(0, k)
+
+for (i in 1:n) {
+  j <- sum(U <= u[i, 1])
+  n_i[j] <- n_i[j] + 1
+  S_i[j] <- S_i[j] + max(u[i,]) - u[i, 1]
+}
+
+# Estimating the Pickands function
+n_i <- n_i[n_i > 0]  # remove empty intervals
+S_i <- S_i[n_i > 0]
+mu_i <- S_i/n_i
+theta_hat <- log(mu_i[-1]/mu_i[-length(mu_i)]) / log(U[-1]/U[-length(U)])
+
+```
+
+DETERMINING THE EXTREMAL COEFFICIENT
+```{r}
+#### bivariate EXTREMAL COEFFICIENT
+theta <- 1 - 2 * BiCopTau(fit, c(0, 0))
+## theta is the coeeficinet
+```
+
+
