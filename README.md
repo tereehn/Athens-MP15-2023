@@ -19,6 +19,6 @@ A comprehensive univariate extreme value analysis was performed for the variable
 
 ## Extremal Index Study
 
-For at least one of the locations, an investigation into the extremal index of the time series was carried out. The effect on the estimation of probabilities and extreme quantiles was assessed.
+For one of the locations, an investigation into the extremal index of the time series was carried out. The effect on the estimation of probabilities and extreme quantiles was assessed.
 
 The entire analysis was completed for the Extreme Value Statistics course (MP15) at Mines ParisTech. The findings and results are available in this repository.
