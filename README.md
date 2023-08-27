@@ -1,4 +1,4 @@
-# Rainfall Station Measurements in Victoria, AU - Extreme Value Statistics Analysis
+# Rainfall Station Measurements in Victoria🌊, AU - Extreme Value Statistics Analysis
 
 This repository presents the analysis of rainfall station measurements in the state of Victoria, AU. The data files, named Gteam_number.RData, contain three objects: a data frame with measurements from five locations, corresponding dates, and geographical coordinates.
 
